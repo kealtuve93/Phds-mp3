@@ -1,22 +1,23 @@
-import Database from "better-sqlite3";
-import path from "path";
+import { createClient, type Client, type Row } from "@libsql/client";
 
-const DB_PATH = path.join(process.cwd(), "playlist.db");
+let client: Client | null = null;
+let initialized = false;
 
-let db: Database.Database | null = null;
-
-function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    initDb(db);
+function getClient(): Client {
+  if (!client) {
+    client = createClient({
+      url: process.env.TURSO_DATABASE_URL || "file:playlist.db",
+      authToken: process.env.TURSO_AUTH_TOKEN,
+    });
   }
-  return db;
+  return client;
 }
 
-function initDb(db: Database.Database) {
-  db.exec(`
+async function initDb(): Promise<void> {
+  if (initialized) return;
+  const db = getClient();
+
+  await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS prompts (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -63,6 +64,25 @@ function initDb(db: Database.Database) {
       UNIQUE(playlist_id, track_uri)
     );
   `);
+
+  initialized = true;
 }
 
-export default getDb;
+export async function query(
+  sql: string,
+  args: (string | number | null)[] = []
+): Promise<Row[]> {
+  await initDb();
+  const db = getClient();
+  const result = await db.execute({ sql, args });
+  return result.rows;
+}
+
+export async function execute(
+  sql: string,
+  args: (string | number | null)[] = []
+): Promise<void> {
+  await initDb();
+  const db = getClient();
+  await db.execute({ sql, args });
+}

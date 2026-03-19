@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import getDb from "@/lib/db";
+import { query, execute } from "@/lib/db";
 import {
   extractTrackId,
   getTrackInfo,
   refreshAccessToken,
   addTracksToPlaylist,
 } from "@/lib/spotify";
-
-interface CommunityPlaylist {
-  id: string;
-  spotify_playlist_id: string | null;
-  spotify_refresh_token: string | null;
-}
 
 export async function POST(
   request: NextRequest,
@@ -28,15 +22,16 @@ export async function POST(
     );
   }
 
-  const db = getDb();
+  const playlists = await query(
+    "SELECT * FROM community_playlists WHERE id = ?",
+    [id]
+  );
 
-  const playlist = db
-    .prepare("SELECT * FROM community_playlists WHERE id = ?")
-    .get(id) as CommunityPlaylist | undefined;
-
-  if (!playlist) {
+  if (playlists.length === 0) {
     return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
   }
+
+  const playlist = playlists[0];
 
   if (!playlist.spotify_playlist_id || !playlist.spotify_refresh_token) {
     return NextResponse.json(
@@ -48,10 +43,7 @@ export async function POST(
   const trackId = extractTrackId(spotifyLink);
   if (!trackId) {
     return NextResponse.json(
-      {
-        error:
-          "Invalid Spotify link. Please provide a valid Spotify track URL or URI.",
-      },
+      { error: "Invalid Spotify link. Please provide a valid Spotify track URL or URI." },
       { status: 400 }
     );
   }
@@ -59,32 +51,33 @@ export async function POST(
   const trackInfo = await getTrackInfo(trackId);
   const trackUri = trackInfo?.uri || `spotify:track:${trackId}`;
 
-  // Check for duplicates
-  const existing = db
-    .prepare(
-      "SELECT id FROM community_submissions WHERE playlist_id = ? AND track_uri = ?"
-    )
-    .get(id, trackUri);
+  const existing = await query(
+    "SELECT id FROM community_submissions WHERE playlist_id = ? AND track_uri = ?",
+    [id, trackUri]
+  );
 
-  if (existing) {
+  if (existing.length > 0) {
     return NextResponse.json(
       { error: "This track has already been added to the playlist" },
       { status: 400 }
     );
   }
 
-  // Add track to Spotify playlist using refresh token
   try {
-    const tokens = await refreshAccessToken(playlist.spotify_refresh_token);
-    await addTracksToPlaylist(tokens.access_token, playlist.spotify_playlist_id, [
-      trackUri,
-    ]);
+    const tokens = await refreshAccessToken(
+      playlist.spotify_refresh_token as string
+    );
+    await addTracksToPlaylist(
+      tokens.access_token,
+      playlist.spotify_playlist_id as string,
+      [trackUri]
+    );
 
-    // If Spotify returned a new refresh token, update it
     if (tokens.refresh_token) {
-      db.prepare(
-        "UPDATE community_playlists SET spotify_refresh_token = ? WHERE id = ?"
-      ).run(tokens.refresh_token, id);
+      await execute(
+        "UPDATE community_playlists SET spotify_refresh_token = ? WHERE id = ?",
+        [tokens.refresh_token, id]
+      );
     }
   } catch (err) {
     console.error("Failed to add track to Spotify:", err);
@@ -94,17 +87,9 @@ export async function POST(
     );
   }
 
-  // Save to DB
-  db.prepare(
-    "INSERT INTO community_submissions (playlist_id, track_uri, track_name, track_artist, track_image, submitted_by, description) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(
-    id,
-    trackUri,
-    trackInfo?.name || null,
-    trackInfo?.artist || null,
-    trackInfo?.image || null,
-    submittedBy,
-    description || null
+  await execute(
+    "INSERT INTO community_submissions (playlist_id, track_uri, track_name, track_artist, track_image, submitted_by, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [id, trackUri, trackInfo?.name || null, trackInfo?.artist || null, trackInfo?.image || null, submittedBy, description || null]
   );
 
   return NextResponse.json({

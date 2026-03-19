@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import getDb from "@/lib/db";
+import { query, execute } from "@/lib/db";
 import { extractTrackId, getTrackInfo } from "@/lib/spotify";
 
 export async function POST(
@@ -17,16 +17,12 @@ export async function POST(
     );
   }
 
-  const db = getDb();
-
-  const prompt = db
-    .prepare("SELECT * FROM prompts WHERE id = ?")
-    .get(id) as { is_open: number } | undefined;
-
-  if (!prompt) {
+  const prompts = await query("SELECT * FROM prompts WHERE id = ?", [id]);
+  if (prompts.length === 0) {
     return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
   }
 
+  const prompt = prompts[0];
   if (!prompt.is_open) {
     return NextResponse.json(
       { error: "Submissions are closed for this prompt" },
@@ -42,31 +38,24 @@ export async function POST(
     );
   }
 
-  // Look up track info from Spotify
   const trackInfo = await getTrackInfo(trackId);
   const trackUri = trackInfo?.uri || `spotify:track:${trackId}`;
 
-  // Check for duplicate submissions
-  const existing = db
-    .prepare("SELECT id FROM submissions WHERE prompt_id = ? AND track_uri = ?")
-    .get(id, trackUri);
+  const existing = await query(
+    "SELECT id FROM submissions WHERE prompt_id = ? AND track_uri = ?",
+    [id, trackUri]
+  );
 
-  if (existing) {
+  if (existing.length > 0) {
     return NextResponse.json(
       { error: "This track has already been submitted" },
       { status: 400 }
     );
   }
 
-  db.prepare(
-    "INSERT INTO submissions (prompt_id, track_uri, track_name, track_artist, track_image, submitted_by) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(
-    id,
-    trackUri,
-    trackInfo?.name || null,
-    trackInfo?.artist || null,
-    trackInfo?.image || null,
-    submittedBy
+  await execute(
+    "INSERT INTO submissions (prompt_id, track_uri, track_name, track_artist, track_image, submitted_by) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, trackUri, trackInfo?.name || null, trackInfo?.artist || null, trackInfo?.image || null, submittedBy]
   );
 
   return NextResponse.json({
