@@ -2,16 +2,63 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || "";
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || "";
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || "";
 
-export function getAuthUrl(promptId: string): string {
+export function getAuthUrl(state: string): string {
   const scopes = "playlist-modify-public playlist-modify-private";
   const params = new URLSearchParams({
     response_type: "code",
     client_id: SPOTIFY_CLIENT_ID,
     scope: scopes,
     redirect_uri: SPOTIFY_REDIRECT_URI,
-    state: promptId,
+    state,
   });
   return `https://accounts.spotify.com/authorize?${params.toString()}`;
+}
+
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<{ access_token: string; refresh_token?: string }> {
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(
+        `${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`
+      ).toString("base64")}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Spotify refresh error: ${err}`);
+  }
+
+  return response.json();
+}
+
+export async function addTracksToPlaylist(
+  accessToken: string,
+  playlistId: string,
+  trackUris: string[]
+): Promise<void> {
+  for (let i = 0; i < trackUris.length; i += 100) {
+    const batch = trackUris.slice(i, i + 100);
+    const res = await fetch(
+      `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ uris: batch }),
+      }
+    );
+    if (!res.ok) throw new Error("Failed to add tracks to playlist");
+  }
 }
 
 export async function getAccessToken(code: string): Promise<{

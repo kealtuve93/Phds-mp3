@@ -20,12 +20,20 @@ export default function RootLayout({
             <a href="/" className="text-xl font-bold text-green-400 hover:text-green-300 transition">
               🎵 Phds MP3
             </a>
-            <a
-              href="/create"
-              className="bg-green-500 hover:bg-green-400 text-gray-950 font-semibold px-4 py-2 rounded-full text-sm transition"
-            >
-              + New Prompt
-            </a>
+            <div className="flex items-center gap-3">
+              <a
+                href="/community/new"
+                className="bg-purple-500 hover:bg-purple-400 text-white font-semibold px-4 py-2 rounded-full text-sm transition"
+              >
+                + Community Playlist
+              </a>
+              <a
+                href="/create"
+                className="bg-green-500 hover:bg-green-400 text-gray-950 font-semibold px-4 py-2 rounded-full text-sm transition"
+              >
+                + New Prompt
+              </a>
+            </div>
           </div>
         </header>
         <main className="max-w-4xl mx-auto px-4 py-8">{children}</main>
